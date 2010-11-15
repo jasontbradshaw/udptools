@@ -31,6 +31,8 @@ def play(dump_file, host, port):
             line_time = float(line_parts[0])
             line_data = base64.b64decode(line_parts[1].rstrip()) # strip newline
 
+            # TODO: find a way to reduce cpu usage while playing packets!
+
             # wait until we should play the next packet
             loop_time = time.time()
             while loop_time - last_loop_time < line_time - last_line_time:
