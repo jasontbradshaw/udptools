@@ -22,6 +22,9 @@ def play(dump_file, host, port):
         # guarantees that the first packet gets sent out immediately.  the
         # variables assume normal values from then on.
         last_line_time = float("inf")
+
+        # this allows us to ignore whether the file is timed with absolute time
+        # (starting at some arbitrary date) or relative time (starting at 0.0).
         last_loop_time = float("-inf")
 
         # every line is a single packet, so we loop over all of them
@@ -32,6 +35,9 @@ def play(dump_file, host, port):
             line_data = base64.b64decode(line_parts[1].rstrip()) # strip newline
 
             # TODO: find a way to reduce cpu usage while playing packets!
+            # Ideas:
+            #  - assign time.sleep, base64.b64decode, etc. to variables
+            #  - remove rstrip and replace with a slicing off the final char
 
             # wait until we should play the next packet
             loop_time = time.time()
