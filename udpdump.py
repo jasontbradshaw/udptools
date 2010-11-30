@@ -44,5 +44,8 @@ if __name__ == "__main__":
     port = int(sys.argv[3])
     
     # record packets
-    dump(dump_file, host, port)
+    try:
+        dump(dump_file, host, port)
+    except KeyboardInterrupt:
+        pass
 

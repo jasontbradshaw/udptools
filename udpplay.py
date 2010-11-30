@@ -62,5 +62,8 @@ if __name__ == "__main__":
     port = int(sys.argv[3])
 
     # play the file
-    play(dump_file, host, port)
+    try:
+        play(dump_file, host, port)
+    except KeyboardInterrupt:
+        pass
 
