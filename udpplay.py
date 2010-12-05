@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 import socket
-import base64
-import time
+from binascii import a2b_base64 as b64decode
+from time import time, sleep
 
 def play(dump_file, host, port):
     """
@@ -32,7 +32,7 @@ def play(dump_file, host, port):
             # part before tab is time, part after is data followed by a newline
             line_parts = line.split("\t")
             line_time = float(line_parts[0])
-            line_data = base64.b64decode(line_parts[1].rstrip()) # strip newline
+            line_data = b64decode(line_parts[1].rstrip()) # strip newline
 
             # TODO: find a way to reduce cpu usage while playing packets!
             # Ideas:
@@ -40,9 +40,9 @@ def play(dump_file, host, port):
             #  - remove rstrip and replace with a slicing off the final char
 
             # wait until we should play the next packet
-            loop_time = time.time()
+            loop_time = time()
             while loop_time - last_loop_time < line_time - last_line_time:
-                loop_time = time.time()
+                loop_time = time()
 
             # play the next packet
             s.sendto(line_data, addy)
