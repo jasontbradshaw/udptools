@@ -13,10 +13,6 @@ def play(dump_file, host, port):
     use of CPU time than playing them back more precisely.
     """
 
-    # TODO: fix the unknown corner case where there is a glitch very near the
-    # beginning of playback.  possibly related to the negative-time situation
-    # when sleeping.
-
     # create the socket we'll send packets over
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -25,7 +21,7 @@ def play(dump_file, host, port):
     send_packet = lambda data: s.sendto(data, addy)
 
     # used to store up packets before playing all at once
-    buflen = 100
+    buflen = 50
     buf = []
 
     # read packets from the file and play them to the given address
@@ -113,11 +109,6 @@ def precise_play(dump_file, host, port):
             line_parts = line.split("\t")
             line_time = float(line_parts[0])
             line_data = base64.b64decode(line_parts[1].rstrip()) # strip newline
-
-            # TODO: find a way to reduce cpu usage while playing packets!
-            # Ideas:
-            #  - assign time.sleep, base64.b64decode, etc. to variables
-            #  - remove rstrip and replace with a slicing off the final char
 
             # wait until we should play the next packet
             loop_time = time.time()
