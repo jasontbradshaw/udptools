@@ -57,9 +57,11 @@ def play(dump_file, host, port):
             # wait until the next buffer should be played. next_play_time is
             # None before the first play.
             if next_play_time is not None:
+                # see how much time we should wait before playing the new buffer
+                sleep_time = next_play_time - time.time()
+
                 # if we took too much time parsing the last round's packets,
                 # play them immediately.
-                sleep_time = next_play_time - time.time()
                 if sleep_time > 0:
                     time.sleep(sleep_time)
 
