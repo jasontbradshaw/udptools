@@ -3,124 +3,195 @@
 import socket
 import base64
 import time
+import multiprocessing as mp
 
-def play(dump_file, host, port):
+class AlreadyPlayingError(Exception):
     """
-    Plays a given dump file to the specified host and port.  Doesn't play back
-    packets at the precise rate received, relying on the ability of any
-    receiving client to correctly buffer them and play them back at their
-    original rate in some other manner.  Doing this allows a far more efficient
-    use of CPU time than playing them back more precisely.
+    Raised when 'play' is called while the process is already playing.
     """
 
-    # create the socket we'll send packets over
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+class UDPPlay:
+    def __init__(self):
+        self.__proc = None
 
-    # we make a function here that makes sending data quick and easy
-    addy = (host, port)
-    send_packet = lambda data: s.sendto(data, addy)
+    def is_playing(self):
+        """
+        Returns whether a file is currently playing.
+        """
 
-    # used to store up packets before playing all at once
-    buflen = 50
-    buf = []
+        return self.__proc is not None and self.__proc.is_alive()
 
-    # read packets from the file and play them to the given address
-    with open(dump_file, 'r') as f:
-        next_play_time = None
-        last_play_time = None
-        first_packet_timestamp = None
-        for line in f:
-            # part before tab is time, part after is data followed by a newline
-            line_parts = line.split("\t")
-            packet_timestamp = float(line_parts[0])
-            packet_data = base64.b64decode(line_parts[1].rstrip()) # strip newline
+    def play(self, dump_file, host, port):
+        """
+        Plays the given file to the given host and port.
+        """
 
-            # fill buffer, saving times of first and last packets
-            if len(buf) < buflen - 1:
-                # save the time of the first packet for later
-                if len(buf) == 0:
-                    first_packet_timestamp = packet_timestamp
+        # make sure that we don't start a new process while there's one already
+        # running.
+        if self.is_playing():
+            raise AlreadyPlayingError("Unable to start a new play process while"
+                    " one is already running.  Stop playback first!")
 
-                buf.append(packet_data)
-                continue
-            else:
-                # append the last packet, the one read before buflen check failed
-                buf.append(packet_data)
+        args = (dump_file, host, port)
+        self.__proc = mp.Process(target=self.__play_loop, args=args)
 
-                # get first and last packet times and calculate total buffer time
-                buffer_time = packet_timestamp - first_packet_timestamp
+        self.__proc.start()
 
-            # wait until the next buffer should be played. next_play_time is
-            # None before the first play.
-            if next_play_time is not None:
-                # see how much time we should wait before playing the new buffer
-                sleep_time = next_play_time - time.time()
+    def precise_play(self, dump_file, host, port):
+        """
+        Plays back a file to the given host and port, preserving the original
+        times between packets as accurately as possible.
+        """
 
-                # if we took too much time parsing the last round's packets,
-                # play them immediately.
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
+        # make sure that we don't start a new process while there's one already
+        # running.
+        if self.is_playing():
+            raise AlreadyPlayingError("Unable to start a new play process while"
+                    " one is already running.  Stop playback first!")
 
-            # send all packets in the buffer, marking time we started playing
-            # the buffer.
-            last_play_time = time.time()
+        args = (dump_file, host, port)
+        self.__proc = mp.Process(target=self.__precise_play_loop, args=args)
+
+        self.__proc.start()
+
+    def stop(self):
+        """
+        Stop any current playback.  Does nothing if nothing is playing.
+        """
+
+        # only terminate the process if it's playing
+        if self.is_playing():
+            self.__proc.terminate()
+
+        # only join the process if it's not 'None'
+        if self.__proc is not None:
+            self.__proc.join()
+
+    def __play_loop(self, dump_file, host, port):
+        """
+        Plays a given dump file to the specified host and port.  Doesn't play
+        back packets at the precise rate received, relying on the ability of any
+        receiving client to correctly buffer them and play them back at their
+        original rate in some other manner.  Doing this allows a far more
+        efficient use of CPU time than playing them back more precisely.
+        """
+
+        # create the socket we'll send packets over
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        # we make a function here that makes sending data quick and easy
+        addy = (host, port)
+        send_packet = lambda data: s.sendto(data, addy)
+
+        # used to store up packets before playing all at once
+        buflen = 100
+        buf = []
+
+        # read packets from the file and play them to the given address
+        with open(dump_file, 'r') as f:
+            next_play_time = None
+            last_play_time = None
+            first_packet_timestamp = None
+            for line in f:
+                # part before tab is time, part after is data followed by a '\n'
+                line_parts = line.split("\t")
+                packet_timestamp = float(line_parts[0])
+
+                # the rstrip call removes the trailing newline
+                packet_data = base64.b64decode(line_parts[1].rstrip())
+
+                # fill buffer, saving times of first and last packets
+                if len(buf) < buflen - 1:
+                    # save the time of the first packet for later
+                    if len(buf) == 0:
+                        first_packet_timestamp = packet_timestamp
+
+                    buf.append(packet_data)
+                    continue
+                else:
+                    # append the last packet, the one read before buflen check
+                    # failed.
+                    buf.append(packet_data)
+
+                    # get first and last packet times and calculate total buffer
+                    # time.
+                    buffer_time = packet_timestamp - first_packet_timestamp
+
+                # wait until the next buffer should be played. next_play_time is
+                # None before the first play.
+                if next_play_time is not None:
+                    # see how much time we should wait before playing the new
+                    # buffer.
+                    sleep_time = next_play_time - time.time()
+
+                    # if we took too much time parsing the last round's packets,
+                    # play them immediately.
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+
+                # send all packets in the buffer, marking time we started
+                # playing the buffer.
+                last_play_time = time.time()
+                map(send_packet, buf)
+
+                # set the next time we play as the number of seconds long the
+                # buffer was after the last time we played that buffer.
+                next_play_time = last_play_time + buffer_time
+
+                # reset buffer so we'll fill it again
+                buf = []
+
+            # wait until we should play what remains in the buffer
+            time.sleep(next_play_time - time.time())
+
+            # send what's left in the buffer
             map(send_packet, buf)
 
-            # set the next time we play as the number of seconds long the buffer
-            # was after the last time we played that buffer.
-            next_play_time = last_play_time + buffer_time
+    def __precise_play_loop(self, dump_file, host, port):
+        """
+        Plays a given dump file to the specified host and port, sending packets
+        at the precise rate they were received.  NOTE: Uses 100% CPU time!
+        """
 
-            # reset buffer so we'll fill it again
-            buf = []
+        # create the socket we'll send packets over
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        # wait until we should play what remains in the buffer
-        time.sleep(next_play_time - time.time())
+        # we make a tuple here to prevent doing so on every loop iteration
+        addy = (host, port)
 
-        # send what's left in the buffer
-        map(send_packet, buf)
+        with open(dump_file, 'r') as f:
+            # the alternative to these values are placeholder values.  we would
+            # have to check for these every iteration of the loop, slowing
+            # things down.  this allows us to assume that we can do a valid
+            # comparison, and guarantees that the first packet gets sent out
+            # immediately.  the variables assume normal values from then on.
+            last_line_time = float("inf")
 
-def precise_play(dump_file, host, port):
-    """
-    Plays a given dump file to the specified host and port, sending packets at
-    the precise rate they were received.  NOTE: Uses 100% CPU time!
-    """
+            # this allows us to ignore whether the file is timed with absolute
+            # time (starting at some arbitrary date) or relative time (starting
+            # at 0.0).
+            last_loop_time = float("-inf")
 
-    # create the socket we'll send packets over
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # every line is a single packet, so we loop over all of them
+            for line in f:
+                # part before tab is time, part after is data, then a newline
+                line_parts = line.split("\t")
+                line_time = float(line_parts[0])
 
-    # we make a tuple here to prevent doing so on every loop iteration
-    addy = (host, port)
+                # strip the trailing newline from the data before encoding
+                line_data = base64.b64decode(line_parts[1].rstrip())
 
-    with open(dump_file, 'r') as f:
-        # the alternative to these values are placeholder values.  we would have
-        # to check for these every iteration of the loop, slowing things down.
-        # this allows us to assume that we can do a valid comparison, and
-        # guarantees that the first packet gets sent out immediately.  the
-        # variables assume normal values from then on.
-        last_line_time = float("inf")
-
-        # this allows us to ignore whether the file is timed with absolute time
-        # (starting at some arbitrary date) or relative time (starting at 0.0).
-        last_loop_time = float("-inf")
-
-        # every line is a single packet, so we loop over all of them
-        for line in f:
-            # part before tab is time, part after is data followed by a newline
-            line_parts = line.split("\t")
-            line_time = float(line_parts[0])
-            line_data = base64.b64decode(line_parts[1].rstrip()) # strip newline
-
-            # wait until we should play the next packet
-            loop_time = time.time()
-            while loop_time - last_loop_time < line_time - last_line_time:
+                # wait until we should play the next packet
                 loop_time = time.time()
+                while loop_time - last_loop_time < line_time - last_line_time:
+                    loop_time = time.time()
 
-            # play the next packet
-            s.sendto(line_data, addy)
+                # play the next packet
+                s.sendto(line_data, addy)
 
-            # update the time variables
-            last_line_time = line_time
-            last_loop_time = loop_time
+                # update the time variables
+                last_line_time = line_time
+                last_loop_time = loop_time
 
 if __name__ == "__main__":
     import sys
@@ -133,8 +204,12 @@ if __name__ == "__main__":
     port = int(sys.argv[3])
 
     # play the file
+    udpplay = UDPPlay()
+    udpplay.play(dump_file, host, port)
+
     try:
-        play(dump_file, host, port)
+        while 1:
+            time.sleep(0.1)
     except KeyboardInterrupt:
-        pass
+        udpplay.stop()
 
