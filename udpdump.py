@@ -100,7 +100,7 @@ if __name__ == "__main__":
     udpdump.dump(dump_file, host, port)
 
     try:
-        while 1:
+        while udpdump.is_dumping():
             time.sleep(0.1)
     except KeyboardInterrupt:
         udpdump.stop()
