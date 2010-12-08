@@ -21,7 +21,7 @@ class UDPPlay:
 
         return self.__proc is not None and self.__proc.is_alive()
 
-    def play(self, dump_file, host, port):
+    def play(self, dump_file, host, port, begin_time=0, end_time=None):
         """
         Plays the given file to the given host and port.
         """
@@ -32,25 +32,8 @@ class UDPPlay:
             raise AlreadyPlayingError("Unable to start a new play process while"
                     " one is already running.  Stop playback first!")
 
-        args = (dump_file, host, port)
+        args = (dump_file, host, port, begin_time, end_time)
         self.__proc = mp.Process(target=self.__play_loop, args=args)
-
-        self.__proc.start()
-
-    def precise_play(self, dump_file, host, port):
-        """
-        Plays back a file to the given host and port, preserving the original
-        times between packets as accurately as possible.
-        """
-
-        # make sure that we don't start a new process while there's one already
-        # running.
-        if self.is_playing():
-            raise AlreadyPlayingError("Unable to start a new play process while"
-                    " one is already running.  Stop playback first!")
-
-        args = (dump_file, host, port)
-        self.__proc = mp.Process(target=self.__precise_play_loop, args=args)
 
         self.__proc.start()
 
@@ -67,7 +50,7 @@ class UDPPlay:
         if self.__proc is not None:
             self.__proc.join()
 
-    def __play_loop(self, dump_file, host, port):
+    def __play_loop(self, dump_file, host, port, begin_time, end_time):
         """
         Plays a given dump file to the specified host and port.  Doesn't play
         back packets at the precise rate received, relying on the ability of any
@@ -87,8 +70,20 @@ class UDPPlay:
         buflen = 100
         buf = []
 
+        # if necessary, find the start position before beginning playback
+        start_position = None
+        if begin_time > 0:
+            print "start seek..."
+            start_position = self.find_timestamp_position(dump_file, begin_time)
+            print "end seek."
+
         # read packets from the file and play them to the given address
         with open(dump_file, 'r') as f:
+
+            # seek to the start position if one was set
+            if start_position is not None:
+                f.seek(start_position)
+
             next_play_time = None
             last_play_time = None
             first_packet_timestamp = None
@@ -100,19 +95,23 @@ class UDPPlay:
                 # the rstrip call removes the trailing newline
                 packet_data = base64.b64decode(line_parts[1].rstrip())
 
-                # fill buffer, saving times of first and last packets
+                # stop playback before the specified end time
+                if end_time is not None and packet_timestamp > end_time:
+                    break
+
+                # add the packet to the buffer, since every packet must be added
+                # eventually
+                buf.append(packet_data)
+
+                # save times of first and last packets
                 if len(buf) < buflen - 1:
                     # save the time of the first packet for later
-                    if len(buf) == 0:
+                    if len(buf) == 1:
                         first_packet_timestamp = packet_timestamp
 
-                    buf.append(packet_data)
+                    # keep filling until we're one packet from full 
                     continue
                 else:
-                    # append the last packet, the one read before buflen check
-                    # failed.
-                    buf.append(packet_data)
-
                     # get first and last packet times and calculate total buffer
                     # time.
                     buffer_time = packet_timestamp - first_packet_timestamp
@@ -141,8 +140,11 @@ class UDPPlay:
                 # reset buffer so we'll fill it again
                 buf = []
 
-            # wait until we should play what remains in the buffer
-            time.sleep(next_play_time - time.time())
+            # wait until we should play what remains in the buffer.
+            # next_play_time can be 'None' if the buffer wasn't filled at least
+            # once while iterating over the file.
+            if next_play_time is not None:
+                time.sleep(next_play_time - time.time())
 
             # send what's left in the buffer
             map(send_packet, buf)
@@ -193,22 +195,106 @@ class UDPPlay:
                 last_line_time = line_time
                 last_loop_time = loop_time
 
+    def find_timestamp_position(self, dump_file, timestamp):
+        """
+        Finds the first position directly before the given position in the given
+        dump file.  Returns the file position in bytes such that the next read
+        from that position would be aligned with the beginning of the
+        appropriate line, ie. the first line with a timestamp greater than or
+        equal to the specified timestamp.  Returns 'None' if the requested
+        timestamp could not be found in the file (was too far in the future, for
+        example).
+        """
+
+        def find_recursive(fd, timestamp, start_pos, end_pos):
+            """
+            A binary search algorithm for a timestamped line in the given file.
+            Returns the file position (in bytes) of the beginning of the
+            requested line, or 'None' if that line doesn't exist.  start_pos is
+            the starting byte position to consider, end_pos the end position.
+            An end_pos of 'None' means "The end of the file."
+            """
+
+            # if end_pos is None, set it instead to the end position of the file
+            # by 'seek'ing to the end, then 'tell'ing for the position.
+            if end_pos is None:
+                OS_SEEK_END = 2
+                fd.seek(0, OS_SEEK_END)
+                end_pos = fd.tell()
+
+            # go to the middle of the two given positions
+            middle_pos = (end_pos + start_pos) / 2
+            fd.seek(middle_pos)
+
+            # read a line to skip to the start of the next line. we save the
+            # skipped part so we can use its length to calculate the beginning
+            # of the nearest line.
+            raw_skipped = fd.readline()
+
+            # if we skipped more than half of the remaining bytes being checked
+            # against, we're not going to find a differtn time than what we
+            # already found, so we return the special value -1 to signal that
+            # the previous byte position should be returned.
+            if len(raw_skipped) >= (end_pos - start_pos) / 2:
+                return -1
+
+            # get the next line and parse out the timestamp
+            raw_line = fd.readline()
+            raw_parts = raw_line.split("\t")
+            line_timestamp = float(raw_parts[0])
+
+            # search left half of range
+            if timestamp < line_timestamp: 
+                result = find_recursive(fd, timestamp, start_pos, middle_pos +
+                        len(raw_skipped))
+                if result < 0:
+                    return middle_pos + len(raw_skipped)
+                return result
+
+            # search right half of range
+            elif timestamp > line_timestamp:
+                result = find_recursive(fd, timestamp, middle_pos +
+                        len(raw_skipped), end_pos)
+                if result < 0:
+                    return middle_pos + len(raw_skipped)
+                return result
+
+            # we happened to find the exact point requested
+            else: 
+                return middle_pos + len(raw_skipped)
+
+        # run our recursive function and return the seek position
+        with open(dump_file, 'r') as f:
+            return find_recursive(f, timestamp, 0, None)
+
 if __name__ == "__main__":
     import sys
+    import optparse
+
+    # parse optional arguments first
+    parser = optparse.OptionParser()
+    parser.add_option("-b", "--begin", dest="begin_time", default=0.0,
+            type="float",
+            help="Begin playback at this time instead of the beginning.")
+    parser.add_option("-e", "--end", dest="end_time", default=None,
+            type="float",
+            help="End playback after this time instead of at the end.")
+    options, args = parser.parse_args()
 
     # require the dump file
-    dump_file = sys.argv[1]
+    dump_file = args[0]
 
     # also require the host and port to dump it to
-    host = sys.argv[2]
-    port = int(sys.argv[3])
+    host = args[1]
+    port = int(args[2])
 
     # play the file
     udpplay = UDPPlay()
-    udpplay.play(dump_file, host, port)
+    udpplay.play(dump_file, host, port, begin_time=options.begin_time,
+            end_time=options.end_time)
 
     try:
-        while 1:
+        while udpplay.is_playing():
             time.sleep(0.1)
     except KeyboardInterrupt:
         udpplay.stop()
