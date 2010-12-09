@@ -73,9 +73,7 @@ class UDPPlay:
         # if necessary, find the start position before beginning playback
         start_position = None
         if begin_time > 0:
-            print "start seek..."
             start_position = self.find_timestamp_position(dump_file, begin_time)
-            print "end seek."
 
         # read packets from the file and play them to the given address
         with open(dump_file, 'r') as f:
@@ -215,6 +213,8 @@ class UDPPlay:
             An end_pos of 'None' means "The end of the file."
             """
 
+            # TODO: make this return 'None' when the line isn't found
+
             # if end_pos is None, set it instead to the end position of the file
             # by 'seek'ing to the end, then 'tell'ing for the position.
             if end_pos is None:
@@ -231,8 +231,12 @@ class UDPPlay:
             # of the nearest line.
             raw_skipped = fd.readline()
 
+            # add the part we skipped to the middle position so it lines up with
+            # the nearest packet boundary.
+            middle_pos = middle_pos + len(raw_skipped)
+
             # if we skipped more than half of the remaining bytes being checked
-            # against, we're not going to find a differtn time than what we
+            # against, we're not going to find a different time than what we
             # already found, so we return the special value -1 to signal that
             # the previous byte position should be returned.
             if len(raw_skipped) >= (end_pos - start_pos) / 2:
@@ -245,23 +249,21 @@ class UDPPlay:
 
             # search left half of range
             if timestamp < line_timestamp: 
-                result = find_recursive(fd, timestamp, start_pos, middle_pos +
-                        len(raw_skipped))
+                result = find_recursive(fd, timestamp, start_pos, middle_pos)
                 if result < 0:
-                    return middle_pos + len(raw_skipped)
+                    return middle_pos
                 return result
 
             # search right half of range
             elif timestamp > line_timestamp:
-                result = find_recursive(fd, timestamp, middle_pos +
-                        len(raw_skipped), end_pos)
+                result = find_recursive(fd, timestamp, middle_pos, end_pos)
                 if result < 0:
-                    return middle_pos + len(raw_skipped)
+                    return middle_pos
                 return result
 
             # we happened to find the exact point requested
             else: 
-                return middle_pos + len(raw_skipped)
+                return middle_pos
 
         # run our recursive function and return the seek position
         with open(dump_file, 'r') as f:
