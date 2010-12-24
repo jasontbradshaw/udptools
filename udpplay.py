@@ -70,23 +70,20 @@ class UDPPlay:
         buflen = 100
         buf = []
 
-        # if necessary, find the start position before beginning playback
-        start_position = None
-        if begin_time > 0:
-            start_position = self.find_timestamp_position(dump_file, begin_time)
-
         # read packets from the file and play them to the given address
         with open(dump_file, 'r') as f:
 
-            # seek to the start position if one was set
-            if start_position is not None:
-                f.seek(start_position)
+            # seek to the start position if a relevant begin_time was set
+            if begin_time > 0:
+                start_byte = self.find_timestamp_position(dump_file, begin_time)
+                f.seek(start_byte)
 
             next_play_time = None
             last_play_time = None
             first_packet_timestamp = None
             for line in f:
-                # part before tab is time, part after is data followed by a '\n'
+                # split packet into a time and some data. the part before the
+                # tab is time, part after is data followed by a newline.
                 line_parts = line.split("\t")
                 packet_timestamp = float(line_parts[0])
 
@@ -192,7 +189,7 @@ class UDPPlay:
             # if we skipped more than half of the remaining bytes being checked
             # against, we're not going to find a different time than what we
             # already found, so we return the special value -1 to signal that
-            # the previous byte position should be returned.
+            # the previous middle byte position should be returned.
             if len(raw_skipped) >= (end_pos - start_pos) / 2:
                 return -1
 
@@ -209,15 +206,11 @@ class UDPPlay:
                 return result
 
             # search right half of range
-            elif timestamp > line_timestamp:
+            else:
                 result = find_recursive(fd, timestamp, middle_pos, end_pos)
                 if result < 0:
                     return middle_pos
                 return result
-
-            # we happened to find the exact point requested
-            else: 
-                return middle_pos
 
         # run our recursive function and return the seek position
         with open(dump_file, 'r') as f:
