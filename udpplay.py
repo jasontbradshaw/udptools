@@ -99,12 +99,12 @@ class UDPPlay:
                 buf.append(packet_data)
 
                 # save times of first and last packets
-                if len(buf) < buflen - 1:
+                if len(buf) < buflen:
                     # save the time of the first packet for later
                     if len(buf) == 1:
                         first_packet_timestamp = packet_timestamp
 
-                    # keep filling until we're one packet from full 
+                    # keep filling until we're full
                     continue
                 else:
                     # get first and last packet times and calculate total buffer
@@ -199,7 +199,7 @@ class UDPPlay:
             line_timestamp = float(raw_parts[0])
 
             # search left half of range
-            if timestamp < line_timestamp: 
+            if timestamp < line_timestamp:
                 result = find_recursive(fd, timestamp, start_pos, middle_pos)
                 if result < 0:
                     return middle_pos
