@@ -24,7 +24,7 @@ class UDPDump:
     def dump(self, dump_file, host, port, max_packet_size=16384):
         """
         Dumps any UDP traffic from the given host and port to the given file.
-        max_packet_size is the size in bytes of the larges packet able to be
+        max_packet_size is the size in bytes of the largest packet able to be
         received.
         """
 
