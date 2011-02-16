@@ -64,9 +64,9 @@ class UDPDump:
         # dump packets to the file
         with open(dump_file, 'w') as f:
 
-            # time codes are relative to the first packet received, which has time
-            # 0.0.  we set it after recv so any delay before traffic doesn't show up
-            # in the start time.
+            # time codes are relative to the first packet received, which has
+            # time 0.0.  we set it after recv so any delay before traffic
+            # doesn't show up in the start time.
             first_packet_time = None
             while 1:
                 # receive a packet and save the time we received it
@@ -76,7 +76,8 @@ class UDPDump:
                 # encode the raw binary packet data into a base64 string
                 data = base64.b64encode(raw_packet)
 
-                # mark first received packet time and set its time in file to '0.0'
+                # mark first received packet time and set its time in file to
+                # '0.0'
                 if first_packet_time is None:
                     first_packet_time = recv_time
                     f.write(file_format % (0.0, data))
