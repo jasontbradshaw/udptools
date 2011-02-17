@@ -165,6 +165,7 @@ class UDPPlay:
             """
 
             # TODO: make this return 'None' when the line isn't found
+            # TODO: refactor this method to be more intuitive!
 
             # if end_pos is None, set it instead to the end position of the file
             # by 'seek'ing to the end, then 'tell'ing for the position.
