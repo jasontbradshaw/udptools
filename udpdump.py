@@ -58,7 +58,8 @@ class UDPDump:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.bind((host, port))
 
-        # the format of the lines written to the file, timestamp + data
+        # the format of the lines written to the file, 10 place timestamp, tab,
+        # data.
         file_format = "%.10f\t%s\n"
 
         # dump packets to the file
@@ -71,20 +72,24 @@ class UDPDump:
             while 1:
                 # receive a packet and save the time we received it
                 raw_packet = s.recv(max_packet_size)
-                recv_time = time.time()
+                packet_recv_time = time.time()
 
                 # encode the raw binary packet data into a base64 string
-                data = base64.b64encode(raw_packet)
+                packet_data = base64.b64encode(raw_packet)
 
-                # mark first received packet time and set its time in file to
-                # '0.0'
+                # determine the time we'll write to file for this packet. this
+                # ensures that the first packet is always marked as 0.0.
+                packet_time = None
                 if first_packet_time is None:
-                    first_packet_time = recv_time
-                    f.write(file_format % (0.0, data))
-                    continue
+                    # mark first received packet time
+                    first_packet_time = packet_recv_time
+                    packet_time = 0.0
+                else:
+                    # calculate time since first packet
+                    packet_time = packet_recv_time - first_packet_time
 
                 # write time elapsed from start plus data
-                f.write(file_format % (recv_time - first_packet_time, data))
+                f.write(file_format % (packet_time, packet_data))
 
 if __name__ == "__main__":
     import sys
