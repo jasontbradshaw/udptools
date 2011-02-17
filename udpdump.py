@@ -5,16 +5,13 @@ import base64
 import time
 import multiprocessing as mp
 
-class AlreadyDumpingError(Exception):
-    """
-    Raised when a dump is attempted while one is already running.
-    """
+from udptools_exceptions import AlreadyRunningError
 
 class UDPDump:
     def __init__(self):
         self.__proc = None
 
-    def is_dumping(self):
+    def is_running(self):
         """
         Return whether there is a currently running dump.
         """
@@ -29,8 +26,8 @@ class UDPDump:
         """
 
         # raise an exception if there's already a dump running
-        if self.is_dumping():
-            raise AlreadyDumpingError("Unable to start a new dump while one is "
+        if self.is_running():
+            raise AlreadyRunningError("Unable to start a new dump while one is "
                     "already running.  Stop the current dump first!")
 
         args = (dump_file, host, port, max_packet_size)
@@ -43,11 +40,14 @@ class UDPDump:
         Terminate the currently running dump, if one is running.
         """
 
-        if self.is_dumping():
+        if self.is_running():
             self.__proc.terminate()
 
         if self.__proc is not None:
             self.__proc.join()
+
+        # make sure the process was killed
+        assert not self.__proc.isalive()
 
     def __dump_loop(self, dump_file, host, port, max_packet_size):
         """
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     udpdump.dump(dump_file, host, port)
 
     try:
-        while udpdump.is_dumping():
+        while udpdump.is_running():
             time.sleep(0.1)
     except KeyboardInterrupt:
         udpdump.stop()

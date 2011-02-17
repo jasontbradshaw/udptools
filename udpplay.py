@@ -5,16 +5,13 @@ import base64
 import time
 import multiprocessing as mp
 
-class AlreadyPlayingError(Exception):
-    """
-    Raised when 'play' is called while the process is already playing.
-    """
+from udptools_exceptions import AlreadyRunningError
 
 class UDPPlay:
     def __init__(self):
         self.__proc = None
 
-    def is_playing(self):
+    def is_running(self):
         """
         Returns whether a file is currently playing.
         """
@@ -28,8 +25,8 @@ class UDPPlay:
 
         # make sure that we don't start a new process while there's one already
         # running.
-        if self.is_playing():
-            raise AlreadyPlayingError("Unable to start a new play process while"
+        if self.is_running():
+            raise AlreadyRunningError("Unable to start a new play process while"
                     " one is already running.  Stop playback first!")
 
         args = (dump_file, host, port, begin_time, end_time)
@@ -43,12 +40,15 @@ class UDPPlay:
         """
 
         # only terminate the process if it's playing
-        if self.is_playing():
+        if self.is_running():
             self.__proc.terminate()
 
         # only join the process if it's not 'None'
         if self.__proc is not None:
             self.__proc.join()
+
+        # make sure the process was killed
+        assert not self.is_running()
 
     def __play_loop(self, dump_file, host, port, begin_time, end_time):
         """
@@ -244,8 +244,7 @@ if __name__ == "__main__":
             end_time=options.end_time)
 
     try:
-        while udpplay.is_playing():
+        while udpplay.is_running():
             time.sleep(0.1)
     except KeyboardInterrupt:
         udpplay.stop()
-
