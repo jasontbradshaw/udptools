@@ -66,8 +66,8 @@ class UDPDump:
         with open(dump_file, 'w') as f:
 
             # time codes are relative to the first packet received, which has
-            # time 0.0.  we set it after recv so any delay before traffic
-            # doesn't show up in the start time.
+            # time 0.0. we set it after receive so any delay before traffic
+            # doesn't show up in the first timestamp.
             first_packet_time = None
             while 1:
                 # receive a packet and save the time we received it
@@ -87,6 +87,10 @@ class UDPDump:
                 else:
                     # calculate time since first packet
                     packet_time = packet_recv_time - first_packet_time
+
+                # make sure we've got a valid packet time
+                assert packet_time is not None
+                assert packet_time >= 0.0
 
                 # write time elapsed from start plus data
                 f.write(file_format % (packet_time, packet_data))
@@ -110,4 +114,3 @@ if __name__ == "__main__":
             time.sleep(0.1)
     except KeyboardInterrupt:
         udpdump.stop()
-
