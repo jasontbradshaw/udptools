@@ -1,17 +1,15 @@
 #!/usr/bin/env python
 
 import unittest
-import udpdump
+from udptools import UDPDump
 
 class DumpTests(unittest.TestCase):
     def setUp(self):
-        self.r = Recorder()
-        self.r.rtpplay = rtp.RTPPlayEmulator()
-        self.r.rtpdump = rtp.RTPDumpEmulator()
-    
+        self.u = UDPDump()
+
     def tearDown(self):
-        pass
-    
+        self.u.stop()
+
 if __name__ == '__main__':
     suite = unittest.TestLoader().loadTestsFromTestCase(DumpTests)
     unittest.TextTestRunner(verbosity=2).run(suite)
