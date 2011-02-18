@@ -67,7 +67,7 @@ class UDPPlay:
         # the rstrip call removes the trailing newline
         data = base64.b64decode(parts[1].rstrip())
 
-        return packet_timestamp, data
+        return timestamp, data
 
     def __play_loop(self, dump_file, host, port, begin_time, end_time):
         """
