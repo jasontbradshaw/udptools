@@ -52,6 +52,23 @@ class UDPPlay:
         # make sure the process was killed
         assert not self.is_running()
 
+    def __parse_packet(self, packet):
+        """
+        Splits packet into a time and some data. The part before the tab
+        character is the time, the part after is data followed by a newline.
+        Returns a tuple of (floating point timestamp, binary data string).
+        """
+
+        parts = packet.split("\t")
+        assert len(parts) == 2
+
+        timestamp = float(parts[0])
+
+        # the rstrip call removes the trailing newline
+        data = base64.b64decode(parts[1].rstrip())
+
+        return packet_timestamp, data
+
     def __play_loop(self, dump_file, host, port, begin_time, end_time):
         """
         Plays a given dump file to the specified host and port.  Doesn't play
@@ -74,7 +91,6 @@ class UDPPlay:
 
         # read packets from the file and play them to the given address
         with open(dump_file, 'r') as f:
-
             # seek to the start position if a relevant begin_time was set
             if begin_time > 0:
                 start_byte = self.find_timestamp_position(dump_file, begin_time)
@@ -84,13 +100,8 @@ class UDPPlay:
             last_play_time = None
             first_packet_timestamp = None
             for line in f:
-                # split packet into a time and some data. the part before the
-                # tab is time, part after is data followed by a newline.
-                line_parts = line.split("\t")
-                packet_timestamp = float(line_parts[0])
-
-                # the rstrip call removes the trailing newline
-                packet_data = base64.b64decode(line_parts[1].rstrip())
+                # get the packet pieces so we can send them over the socket
+                packet_timestamp, packet_data = self.__parse_packet(line)
 
                 # stop playback before the specified end time
                 if end_time is not None and packet_timestamp > end_time:
@@ -116,12 +127,11 @@ class UDPPlay:
                 # wait until the next buffer should be played. next_play_time is
                 # None before the first play.
                 if next_play_time is not None:
-                    # see how much time we should wait before playing the new
-                    # buffer.
+                    # see how much time we should wait before playing the buffer
                     sleep_time = next_play_time - time.time()
 
-                    # if we took too much time parsing the last round's packets,
-                    # play them immediately.
+                    # only sleep if we didn't take longer than the buflen to
+                    # parse this round's packets.
                     if sleep_time > 0:
                         time.sleep(sleep_time)
 
