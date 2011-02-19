@@ -9,6 +9,11 @@ class AlreadyRunningError(Exception):
     a play is attempted when the object is already playing.
     """
 
+class PacketParseError(Exception):
+    """
+    Raised when a packet couldn't be successfully parsed.
+    """
+
 class UDPPlay:
     def __init__(self):
         self.__proc = None
@@ -57,15 +62,32 @@ class UDPPlay:
         Splits packet into a time and some data. The part before the tab
         character is the time, the part after is data followed by a newline.
         Returns a tuple of (floating point timestamp, binary data string).
+        Raises a PacketParseError if the packet could not be sucessfully parsed.
         """
 
-        parts = packet.split("\t")
-        assert len(parts) == 2
+        try:
+            parts = packet.split("\t")
+            assert len(parts) == 2
+        except AssertionError:
+            raise PacketParseError("Could not split timestamp and data in "
+                    "packet '%s'" % packet)
 
-        timestamp = float(parts[0])
+        try:
+            timestamp = float(parts[0])
+            assert timestamp >= 0.0
+        except AssertionError:
+            raise PacketParseError("Got invalid timestamp '%.10f' from packet "
+                    "'%s'" % (timestamp, packet))
+        except ValueError:
+            raise PacketParseError("Invalid float format for timestamp in "
+                    "packet '%s'" % packet)
 
-        # the rstrip call removes the trailing newline
-        data = base64.b64decode(parts[1].rstrip())
+        try:
+            # the rstrip call removes the trailing newline
+            data = base64.b64decode(parts[1].rstrip())
+        except Exception, e:
+            raise PacketParseError("Invalid data format in packet '%s'\n"
+                    "Got error: '%s'" % (packet, str(e)))
 
         return timestamp, data
 
@@ -100,8 +122,14 @@ class UDPPlay:
             last_play_time = None
             first_packet_timestamp = None
             for line in f:
-                # get the packet pieces so we can send them over the socket
-                packet_timestamp, packet_data = self.__parse_packet(line)
+                # get the packet pieces so we can send them over the socket. if
+                # we fail to parse the packet, skip it.
+                try:
+                    packet_timestamp, packet_data = self.__parse_packet(line)
+                except PacketParseError, ppe:
+                    # TODO: log this instead
+                    print ppe
+                    continue
 
                 # stop playback before the specified end time
                 if end_time is not None and packet_timestamp > end_time:
