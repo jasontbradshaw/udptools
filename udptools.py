@@ -16,14 +16,14 @@ class PacketParseError(Exception):
 
 class UDPPlay:
     def __init__(self):
-        self.__proc = None
+        self.proc = None
 
     def is_running(self):
         """
         Returns whether a file is currently playing.
         """
 
-        return self.__proc is not None and self.__proc.is_alive()
+        return self.proc is not None and self.proc.is_alive()
 
     def play(self, dump_file, host, port, begin_time=0, end_time=None):
         """
@@ -42,9 +42,9 @@ class UDPPlay:
         # open the file so we can pass it to the thread
         with open(dump_file, 'r') as f:
             args = (f, s, host, port, begin_time, end_time)
-            self.__proc = mp.Process(target=self.__play_loop, args=args)
+            self.proc = mp.Process(target=self.play_loop, args=args)
 
-            self.__proc.start()
+            self.proc.start()
 
     def stop(self):
         """
@@ -53,16 +53,16 @@ class UDPPlay:
 
         # only terminate the process if it's playing
         if self.is_running():
-            self.__proc.terminate()
+            self.proc.terminate()
 
         # only join the process if it's not 'None'
-        if self.__proc is not None:
-            self.__proc.join()
+        if self.proc is not None:
+            self.proc.join()
 
         # make sure the process was killed
-        assert not self.__proc.is_alive()
+        assert not self.proc.is_alive()
 
-    def __parse_packet(self, packet):
+    def parse_packet(self, packet):
         """
         Splits packet into a time and some data. The part before the tab
         character is the time, the part after is data followed by a newline.
@@ -96,7 +96,7 @@ class UDPPlay:
 
         return timestamp, data
 
-    def __play_loop(self, dump_file, sock, host, port, begin_time, end_time):
+    def play_loop(self, dump_file, sock, host, port, begin_time, end_time):
         """
         Plays a given dump file object to the specified host and port.  Doesn't
         play back packets at the precise rate received, relying on the ability
@@ -129,7 +129,7 @@ class UDPPlay:
             # get the packet pieces so we can send them over the socket. if
             # we fail to parse the packet, skip it.
             try:
-                packet_timestamp, packet_data = self.__parse_packet(line)
+                packet_timestamp, packet_data = self.parse_packet(line)
             except PacketParseError, ppe:
                 # TODO: log this instead
                 print ppe
@@ -262,14 +262,14 @@ class UDPPlay:
 
 class UDPDump:
     def __init__(self):
-        self.__proc = None
+        self.proc = None
 
     def is_running(self):
         """
         Return whether there is a currently running dump.
         """
 
-        return self.__proc is not None and self.__proc.is_alive()
+        return self.proc is not None and self.proc.is_alive()
 
     def dump(self, dump_file, host, port, max_packet_size=16384):
         """
@@ -288,9 +288,9 @@ class UDPDump:
 
         with open(dump_file, 'w') as f:
             args = (f, s, host, port, max_packet_size)
-            self.__proc = mp.Process(target=self.__dump_loop, args=args)
+            self.proc = mp.Process(target=self.dump_loop, args=args)
 
-            self.__proc.start()
+            self.proc.start()
 
     def stop(self):
         """
@@ -298,15 +298,15 @@ class UDPDump:
         """
 
         if self.is_running():
-            self.__proc.terminate()
+            self.proc.terminate()
 
-        if self.__proc is not None:
-            self.__proc.join()
+        if self.proc is not None:
+            self.proc.join()
 
         # make sure the process was killed
-        assert not self.__proc.is_alive()
+        assert not self.proc.is_alive()
 
-    def __dump_loop(self, dump_file, sock, host, port, max_packet_size):
+    def dump_loop(self, dump_file, sock, host, port, max_packet_size):
         """
         Dump UDP traffic to the given opened-for-writing file object.
         """
