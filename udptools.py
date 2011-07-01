@@ -15,17 +15,20 @@ class PacketParseError(Exception):
     """
 
 class UDPPlay:
-    def __init__(self):
+    @classmethod
+    def __init__():
         self.proc = None
 
-    def is_running(self):
+    @classmethod
+    def is_running():
         """
         Returns whether a file is currently playing.
         """
 
         return self.proc is not None and self.proc.is_alive()
 
-    def play(self, dump_file, host, port, begin_time=0, end_time=None):
+    @classmethod
+    def play(dump_file, host, port, begin_time=0, end_time=None):
         """
         Plays the given file to the given host and port.
         """
@@ -46,7 +49,8 @@ class UDPPlay:
 
             self.proc.start()
 
-    def stop(self):
+    @classmethod
+    def stop():
         """
         Stop any current playback.  Does nothing if nothing is playing.
         """
@@ -62,7 +66,8 @@ class UDPPlay:
         # make sure the process was killed
         assert not self.proc.is_alive()
 
-    def parse_packet(self, packet):
+    @classmethod
+    def parse_packet(packet):
         """
         Splits packet into a time and some data. The part before the tab
         character is the time, the part after is data followed by a newline.
@@ -96,7 +101,8 @@ class UDPPlay:
 
         return timestamp, data
 
-    def play_loop(self, dump_file, sock, host, port, begin_time, end_time):
+    @classmethod
+    def play_loop(dump_file, sock, host, port, begin_time, end_time):
         """
         Plays a given dump file object to the specified host and port.  Doesn't
         play back packets at the precise rate received, relying on the ability
@@ -118,7 +124,7 @@ class UDPPlay:
 
         # seek to the start position if a relevant begin_time was set
         if begin_time > 0:
-            start_byte = self.find_timestamp_position(dump_file, begin_time)
+            start_byte = self.find_timestamp_smart(dump_file, begin_time)
             dump_file.seek(start_byte)
 
         # read packets from the file and play them to the given address
@@ -188,7 +194,8 @@ class UDPPlay:
         # send what's left in the buffer
         map(send_packet, buf)
 
-    def find_timestamp_position(self, dump_file, timestamp):
+    @classmethod
+    def find_timestamp_smart(dump_file, timestamp):
         """
         Finds the first position directly before the given position in the given
         dump file object.  Returns the file position in bytes such that the next
@@ -261,17 +268,20 @@ class UDPPlay:
         return find_recursive(dump_file, timestamp, 0, None)
 
 class UDPDump:
-    def __init__(self):
+    @classmethod
+    def __init__():
         self.proc = None
 
-    def is_running(self):
+    @classmethod
+    def is_running():
         """
         Return whether there is a currently running dump.
         """
 
         return self.proc is not None and self.proc.is_alive()
 
-    def dump(self, dump_file, host, port, max_packet_size=16384):
+    @classmethod
+    def dump(dump_file, host, port, max_packet_size=16384):
         """
         Dumps any UDP traffic from the given host and port to the given file.
         max_packet_size is the size in bytes of the largest packet able to be
@@ -292,7 +302,8 @@ class UDPDump:
 
             self.proc.start()
 
-    def stop(self):
+    @classmethod
+    def stop():
         """
         Terminate the currently running dump, if one is running.
         """
@@ -306,7 +317,8 @@ class UDPDump:
         # make sure the process was killed
         assert not self.proc.is_alive()
 
-    def dump_loop(self, dump_file, sock, host, port, max_packet_size):
+    @classmethod
+    def dump_loop(dump_file, sock, host, port, max_packet_size):
         """
         Dump UDP traffic to the given opened-for-writing file object.
         """
