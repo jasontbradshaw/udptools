@@ -393,11 +393,10 @@ class Recorder(object):
         self.__proc = None
 
     @synchronized
-    def record(self, append=False, max_packet_size=16384):
+    def record(self, max_packet_size=16384):
         """
-        Record any UDP traffic from an address to a file. append is whether the
-        file should be appended to (defaults to overwriting). max_packet_size is
-        the size in bytes of the largest packet able to be received.
+        Record any UDP traffic from an address to a file. max_packet_size is the
+        size in bytes of the largest packet able to be received.
         """
 
         # don't do anything if it's already recording a file
@@ -411,7 +410,7 @@ class Recorder(object):
 
         # create a function that records to the file, appending if specified
         def record_thread():
-            with open(self.__fname, 'a' if append else 'w') as f:
+            with open(self.__fname, 'w') as f:
                 record(f, sock, max_packet_size, recorder=self)
 
         self.__proc = threading.Thread(record_thread)
