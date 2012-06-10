@@ -6,7 +6,7 @@ import threading
 from base64 import b64encode, b64decode
 from time import time, sleep
 
-def play(f, sock, begin_time=0, end_time=None, player=None):
+def play(f, sock, address, begin_time=0, end_time=None, player=None):
     """
     Plays a given file object to the specified socket. Doesn't play back
     packets at the precise rate received, relying on the ability of any
@@ -19,7 +19,7 @@ def play(f, sock, begin_time=0, end_time=None, player=None):
     STOPPED = Player.STOPPED
 
     # a convenience function for sending a packet over our socket
-    send_packet = lambda packet: sock.sendall(packet.data)
+    send_packet = lambda packet: sock.sendto(packet.data, address)
 
     # used to store up packets before playing all at once
     buflen = 100
@@ -64,7 +64,8 @@ def play(f, sock, begin_time=0, end_time=None, player=None):
         if next_play_time is not None:
             # only sleep if there's time between the last play time and
             # the next calculated playback time.
-            if next_play_time - time() > 0:
+            sleep_time = next_play_time - time()
+            if sleep_time > 0:
                 sleep(sleep_time)
 
         # calculate total buffer time, done here to account for the
@@ -222,7 +223,7 @@ class Player(object):
 
         # create the internal lock used for changing state, set state to stopped
         self.__lock = threading.Lock()
-        self.__state = STOPPED
+        self.__state = Player.STOPPED
 
     @property
     def address(self):
@@ -245,7 +246,7 @@ class Player(object):
 
         # signal that the playback thread should stop
         with self.__lock:
-            self.__state = STOPPED
+            self.__state = Player.STOPPED
 
         # join the playback thread and reset it
         self.__proc.join(timeout)
@@ -266,23 +267,26 @@ class Player(object):
 
         with self.__lock:
             # don't do anything if it's already playing a file
-            if self.__state != STOPPED:
+            if self.__state != Player.STOPPED:
                 return False
 
-            # create the socket, binding it to the address
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.bind(self.__address)
+            # create the socket, connecting it to the address
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
             # create a function that opens and plays the internal file
             def play_thread():
                 with open(self.__fname, 'r') as f:
-                    play(f, sock, begin_time, end_time, player=self)
+                    play(f, s, self.__address, begin_time, end_time, player=self)
+
+                # set state to stopped once the file finishes playing
+                with self.__lock:
+                    self.__state = Player.STOPPED
 
             # build the playback thread
-            self.__proc = threading.Thread(play_thread)
+            self.__proc = threading.Thread(target=play_thread)
 
             # set that we're playing before we start the thread
-            self.__state = PLAYING
+            self.__state = Player.PLAYING
 
             # start the playback thread
             self.__proc.start()
@@ -302,7 +306,7 @@ class Recorder(object):
         self.__proc = None
 
         self.__lock = threading.Lock()
-        self.__state = STOPPED
+        self.__state = Recorder.STOPPED
 
     @property
     def address(self):
@@ -324,7 +328,7 @@ class Recorder(object):
         """Stop recording and join the underlying thread."""
 
         with self.__lock:
-            self.__state = STOPPED
+            self.__state = Recorder.STOPPED
 
         self.__proc.join(timeout)
 
@@ -341,7 +345,7 @@ class Recorder(object):
 
         with self.__lock:
             # don't do anything if it's already recording a file
-            if self.__state != STOPPED:
+            if self.__state != Recorder.STOPPED:
                 return False
 
             # set up the socket we're capturing packets from
@@ -354,8 +358,13 @@ class Recorder(object):
                 with open(self.__fname, 'w') as f:
                     record(f, sock, max_packet_size, recorder=self)
 
-            self.__proc = threading.Thread(record_thread)
-            self.__state = RECORDING
+                with self.__lock:
+                    self.__state = Recorder.STOPPED
+
+                s.shutdown(socket.SHUT_RDWR)
+
+            self.__proc = threading.Thread(target=record_thread)
+            self.__state = Recorder.RECORDING
             self.__proc.start()
 
             return True
