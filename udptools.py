@@ -1,61 +1,24 @@
-import socket
 import base64
+import os
+import socket
 import time
-import multiprocessing as mp
 
 class UDPPlay:
-    def __init__(self):
-        self.proc = None
 
-    def is_running(self):
-        """
-        Returns whether a file is currently playing.
-        """
-
-        return self.proc is not None and self.proc.is_alive()
-
-    def play(self, dump_file, host, port, begin_time=0, end_time=None):
-        """
-        Plays the given file to the given host and port. Returns False and does
-        nothing if the process is already running, otherwise starts the playback
-        and returns True once the playback finishes.
-        """
-
-        # make sure that we don't start a new process while there's one already
-        # running.
-        if self.is_running():
-            return False
+    def play(self, fname, address, begin_time=0, end_time=None):
+        """Play a file to an address. Blocks until the operation finishes."""
 
         # create the socket we'll send packets over
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         # open the file so we can pass it to the thread
-        with open(dump_file, 'r') as f:
-            args = (f, s, host, port, begin_time, end_time)
-            self.proc = mp.Process(target=self.play_loop, args=args)
-
-            self.proc.start()
+        with open(os.path.abspath(fname), 'r') as f:
+            self.__play(f, s, address, begin_time, end_time)
 
         # signal that playback completed
         return True
 
-    def stop(self):
-        """
-        Stop any current playback.  Does nothing if nothing is playing.
-        """
-
-        # only terminate the process if it's playing
-        if self.is_running():
-            self.proc.terminate()
-
-        # only join the process if it's not 'None'
-        if self.proc is not None:
-            self.proc.join()
-
-        # make sure the process was killed
-        assert not self.proc.is_alive()
-
-    def parse_packet(self, packet):
+    def __parse_packet(self, packet):
         """
         Splits packet into a time and some data. The part before the tab
         character is the time, the part after is data followed by a newline.
@@ -89,12 +52,12 @@ class UDPPlay:
 
         return timestamp, data
 
-    def play_loop(self, dump_file, sock, host, port, begin_time, end_time):
+    def __play(self, dump_file, sock, address, begin_time, end_time):
         """
-        Plays a given dump file object to the specified host and port.  Doesn't
-        play back packets at the precise rate received, relying on the ability
-        of any receiving client to correctly buffer them and play them back at
-        their original rate in some other manner.  Doing this allows a far more
+        Plays a given dump file object to the specified address. Doesn't play
+        back packets at the precise rate received, relying on the ability of any
+        receiving client to correctly buffer them and play them back at their
+        original rate in some other manner. Doing this allows a far more
         efficient use of CPU time than playing them back more precisely.
         """
 
@@ -102,8 +65,7 @@ class UDPPlay:
         assert dump_file.mode.count("r") > 0
 
         # make a function to make sending data quick and easy
-        addy = (host, port)
-        send_packet = lambda data: sock.sendto(data, addy)
+        send_packet = lambda data: sock.sendto(data, address)
 
         # used to store up packets before playing all at once
         buflen = 100
@@ -111,7 +73,7 @@ class UDPPlay:
 
         # seek to the start position if a relevant begin_time was set
         if begin_time > 0:
-            start_byte = self.find_timestamp_smart(dump_file, begin_time)
+            start_byte = self.__find_timestamp_smart(dump_file, begin_time)
             dump_file.seek(start_byte)
 
         # read packets from the file and play them to the given address
@@ -122,7 +84,7 @@ class UDPPlay:
             # get the packet pieces so we can send them over the socket. if
             # we fail to parse the packet, skip it.
             try:
-                packet_timestamp, packet_data = self.parse_packet(line)
+                packet_timestamp, packet_data = self.__parse_packet(line)
             except ValueError, e:
                 # TODO: log this instead
                 print e
@@ -132,8 +94,7 @@ class UDPPlay:
             if end_time is not None and packet_timestamp > end_time:
                 break
 
-            # add the packet to the buffer, since every packet must be added
-            # eventually
+            # add the packet to the buf (every packet must be added eventually)
             buf.append(packet_data)
 
             # save times of first and last packets
@@ -145,8 +106,7 @@ class UDPPlay:
                 # keep filling until we're full
                 continue
             else:
-                # get first and last packet times and calculate total buffer
-                # time.
+                # get first and last packet times and calculate total buffer time
                 buffer_time = packet_timestamp - first_packet_timestamp
 
             # wait until the next buffer should be played. next_play_time is
@@ -170,7 +130,7 @@ class UDPPlay:
             next_play_time = last_play_time + buffer_time
 
             # reset buffer so we'll fill it again
-            buf = []
+            del buf[:]
 
         # wait until we should play what remains in the buffer.
         # next_play_time can be 'None' if the buffer wasn't filled at least
@@ -181,7 +141,7 @@ class UDPPlay:
         # send what's left in the buffer
         map(send_packet, buf)
 
-    def find_timestamp_smart(self, dump_file, timestamp):
+    def __find_timestamp_smart(self, dump_file, timestamp):
         """
         Finds the first position directly before the given position in the given
         dump file object. Returns the file position in bytes such that the next
@@ -217,7 +177,7 @@ class UDPPlay:
             reverse_seek_to_newline(df)
 
             # read final time in the file so we can interpolate other times
-            final_timestamp = self.parse_packet(df.readline())[0]
+            final_timestamp = self.__parse_packet(df.readline())[0]
 
             # estimate a position for the desired time
             pos_guess = int((1.0 * timestamp / final_timestamp) * file_size)
@@ -248,7 +208,7 @@ class UDPPlay:
                 # get line timestamp and compare to see whether we should return
                 # the previous position. if parse fails, skip the packet.
                 try:
-                    line_timestamp = self.parse_packet(line)[0]
+                    line_timestamp = self.__parse_packet(line)[0]
                 except ValueError:
                     # skip this packet and try the next one
                     break
@@ -264,66 +224,29 @@ class UDPPlay:
         return previous_position
 
 class UDPDump:
-    def __init__(self):
-        self.proc = None
 
-    def is_running(self):
+    def dump(self, fname, address, max_packet_size=16384):
         """
-        Return whether there is a currently running dump.
+        Dump any UDP traffic from an address to a file. max_packet_size is the
+        size in bytes of the largest packet able to be received.
         """
-
-        return self.proc is not None and self.proc.is_alive()
-
-    def dump(self, dump_file, host, port, max_packet_size=16384):
-        """
-        Dumps any UDP traffic from the given host and port to the given file.
-        max_packet_size is the size in bytes of the largest packet able to be
-        received.
-        """
-
-        # raise an exception if there's already a dump running
-        if self.is_running():
-            return False
 
         # set up the socket we're capturing packets from
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        with open(dump_file, 'w') as f:
-            args = (f, s, host, port, max_packet_size)
-            self.proc = mp.Process(target=self.dump_loop, args=args)
-
-            self.proc.start()
+        with open(os.path.abspath(fname), 'w') as f:
+            self.__dump(f, s, address, max_packet_size)
 
         # signal that the dump operation completed
         return True
 
-    def stop(self):
-        """
-        Terminate the currently running dump, if one is running.
-        """
+    def __dump(self, dump_file, sock, address, max_packet_size):
+        """Dump UDP traffic to the given writable file object."""
 
-        if self.is_running():
-            self.proc.terminate()
+        # bind the given socket to the desired address
+        sock.bind(address)
 
-        if self.proc is not None:
-            self.proc.join()
-
-        # make sure the process was killed
-        assert not self.proc.is_alive()
-
-    def dump_loop(self, dump_file, sock, host, port, max_packet_size):
-        """
-        Dump UDP traffic to the given opened-for-writing file object.
-        """
-
-        # make sure we can write to the given file object
-        assert dump_file.mode.count("w") > 0 or dump_file.mode.count("a") > 0
-
-        # bind the given socket to the desired host and port
-        sock.bind((host, port))
-
-        # the format of the lines written to the file, 10 place timestamp, tab,
-        # data.
+        # the format of the file's lines: 10 place timestamp, tab, data
         file_format = "%.10f\t%s\n"
 
         # time codes are relative to the first packet received, which has
