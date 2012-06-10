@@ -1,19 +1,29 @@
 import base64
 import os
 import socket
+import threading
 import time
 
-class UDPPlay:
+class Player:
 
-    def play(self, fname, address, begin_time=0, end_time=None):
-        """Play a file to an address. Blocks until the operation finishes."""
+    def __init__(self, fname, address):
+        self.fname = os.path.abspath(fname)
+        self.address = address
+        self.proc = None
+
+        self.pause = threading.Event()
+        self.stop = threading.Event()
+
+    def play(self, begin_time=0, end_time=None):
+        """Start the play process. Blocks until the operation finishes."""
 
         # create the socket we'll send packets over
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.bind(self.address)
 
         # open the file so we can pass it to the thread
-        with open(os.path.abspath(fname), 'r') as f:
-            self.__play(f, s, address, begin_time, end_time)
+        with open(self.fname, 'r') as f:
+            self.__play(f, s, begin_time, end_time)
 
         # signal that playback completed
         return True
@@ -52,20 +62,17 @@ class UDPPlay:
 
         return timestamp, data
 
-    def __play(self, dump_file, sock, address, begin_time, end_time):
+    def __play(self, f, sock, address, begin_time, end_time):
         """
-        Plays a given dump file object to the specified address. Doesn't play
-        back packets at the precise rate received, relying on the ability of any
+        Plays a given file object to the specified address. Doesn't play back
+        packets at the precise rate received, relying on the ability of any
         receiving client to correctly buffer them and play them back at their
         original rate in some other manner. Doing this allows a far more
         efficient use of CPU time than playing them back more precisely.
         """
 
-        # make sure we can read from the given file object
-        assert dump_file.mode.count("r") > 0
-
-        # make a function to make sending data quick and easy
-        send_packet = lambda data: sock.sendto(data, address)
+        # bind the send function to a local variable to reduce lookup penalty
+        sendall = sock.sendall
 
         # used to store up packets before playing all at once
         buflen = 100
@@ -73,14 +80,14 @@ class UDPPlay:
 
         # seek to the start position if a relevant begin_time was set
         if begin_time > 0:
-            start_byte = self.__find_timestamp_smart(dump_file, begin_time)
-            dump_file.seek(start_byte)
+            start_byte = self.__find_timestamp_smart(f, begin_time)
+            f.seek(start_byte)
 
         # read packets from the file and play them to the given address
         next_play_time = None
         last_play_time = None
         first_packet_timestamp = None
-        for line in dump_file:
+        for line in f:
             # get the packet pieces so we can send them over the socket. if
             # we fail to parse the packet, skip it.
             try:
@@ -123,7 +130,7 @@ class UDPPlay:
             # send all packets in the buffer, marking time we started
             # playing the buffer.
             last_play_time = time.time()
-            map(send_packet, buf)
+            map(sendall, buf)
 
             # set the next time we play as the number of seconds long the
             # buffer was after the last time we played that buffer.
@@ -139,17 +146,17 @@ class UDPPlay:
             time.sleep(next_play_time - time.time())
 
         # send what's left in the buffer
-        map(send_packet, buf)
+        map(sendall, buf)
 
-    def __find_timestamp_smart(self, dump_file, timestamp):
+    def __find_timestamp_smart(self, fname, timestamp):
         """
         Finds the first position directly before the given position in the given
-        dump file object. Returns the file position in bytes such that the next
-        read from that position would return the first line with a timestamp
-        greater than or equal to the specified timestamp. If the given timestamp
-        occurs before the beginning of the file, returns the first position in
-        the dump file. If the given timestamp is after the end of the file,
-        returns the final position in the file.
+        file object. Returns the file position in bytes such that the next read
+        from that position would return the first line with a timestamp greater
+        than or equal to the specified timestamp. If the given timestamp occurs
+        before the beginning of the file, returns the first position in the
+        file. If the given timestamp is after the end of the file, returns the
+        final position in the file.
         """
 
         # TODO: when ANY exception is encountered, fall back to final_timestamp
@@ -165,7 +172,7 @@ class UDPPlay:
                 df.seek(-2, os.SEEK_CUR)
 
         # read the last line of the file to find the time there
-        with open(dump_file, 'r') as df:
+        with open(os.path.abspath(f), 'r') as df:
             # seek to the end of the file and get the file size
             df.seek(0, os.SEEK_END)
             file_size = df.tell()
@@ -191,7 +198,7 @@ class UDPPlay:
 
             # TODO: finish him!
 
-    def find_timestamp(self, dump_file, timestamp):
+    def find_timestamp(self, fname, timestamp):
         """
         Reads every line in a file until it either finds the specified time or
         fails to find it at all. Returns the file position in bytes such that
@@ -202,7 +209,7 @@ class UDPPlay:
         starts, the first position in the file is returned.
         """
 
-        with open(dump_file, 'r') as df:
+        with open(os.path.abspath(fname), 'r') as df:
             previous_position = 0
             for line in df:
                 # get line timestamp and compare to see whether we should return
@@ -223,11 +230,11 @@ class UDPPlay:
 
         return previous_position
 
-class UDPDump:
+class Recorder:
 
-    def dump(self, fname, address, max_packet_size=16384):
+    def record(self, fname, address, max_packet_size=16384):
         """
-        Dump any UDP traffic from an address to a file. max_packet_size is the
+        Record any UDP traffic from an address to a file. max_packet_size is the
         size in bytes of the largest packet able to be received.
         """
 
@@ -235,13 +242,13 @@ class UDPDump:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         with open(os.path.abspath(fname), 'w') as f:
-            self.__dump(f, s, address, max_packet_size)
+            self.__record(f, s, address, max_packet_size)
 
-        # signal that the dump operation completed
+        # signal that the record operation completed
         return True
 
-    def __dump(self, dump_file, sock, address, max_packet_size):
-        """Dump UDP traffic to the given writable file object."""
+    def __record(self, f, sock, address, max_packet_size):
+        """Record UDP traffic to the given writable file object."""
 
         # bind the given socket to the desired address
         sock.bind(address)
@@ -254,7 +261,7 @@ class UDPDump:
         # doesn't show up in the first timestamp.
         first_packet_time = None
 
-        # dump packets to the file
+        # write packets to the file
         while 1:
             # receive a packet and save the time we received it
             raw_packet = sock.recv(max_packet_size)
@@ -279,4 +286,4 @@ class UDPDump:
             assert packet_time >= 0.0
 
             # write time elapsed from start plus data
-            dump_file.write(file_format % (packet_time, packet_data))
+            f.write(file_format % (packet_time, packet_data))
