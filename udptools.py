@@ -31,7 +31,7 @@ def play(f, sock, begin_time=0, end_time=None, player=None):
 
     # seek to the start position if a relevant begin_time was set
     if begin_time > 0:
-        start_byte = find_timestamp_smart(f, begin_time)
+        start_byte = find_timestamp(f, begin_time)
         f.seek(start_byte)
 
     for line in f:
@@ -132,56 +132,6 @@ def record(f, sock, max_packet_size, recorder=None):
 
         # write time elapsed from start plus data
         f.write(file_format % (packet_time, packet_data))
-
-def find_timestamp_smart(fname, timestamp):
-    """
-    Finds the first position directly before the given position in the given
-    file object. Returns the file position in bytes such that the next read
-    from that position would return the first line with a timestamp greater
-    than or equal to the specified timestamp. If the given timestamp occurs
-    before the beginning of the file, returns the first position in the
-    file. If the given timestamp is after the end of the file, returns the
-    final position in the file.
-    """
-
-    # TODO: when ANY exception is encountered, fall back to final_timestamp
-
-    def reverse_seek_to_newline(f):
-        """
-        Seek backwards in an open file until a newline is encountered,
-        leaving the file at the first position after that newline.
-        """
-
-        while f.read(1) != "\n":
-            # seek backwards twice to regain ground lost by reading
-            df.seek(-2, os.SEEK_CUR)
-
-    # read the last line of the file to find the time there
-    with open(os.path.abspath(f), 'r') as df:
-        # seek to the end of the file and get the file size
-        df.seek(0, os.SEEK_END)
-        file_size = df.tell()
-
-        # seek to the last guaranteed non-EOF, non-newline character
-        df.seek(-2, os.SEEK_END)
-
-        # seek backwards and read up to after the first encountered newline
-        reverse_seek_to_newline(df)
-
-        # read final time in the file so we can interpolate other times
-        final_timestamp = Packet.parse_packet(df.readline())[0]
-
-        # estimate a position for the desired time
-        pos_guess = int((1.0 * timestamp / final_timestamp) * file_size)
-
-        # limit the guess to the file's boundaries
-        pos_guess = max(min(pos_guess, file_size), 0)
-
-        # seek to the guessed position and determine which way we need to
-        # read from there to arrive at the desired position.
-        df.seek(pos_guess)
-
-        # TODO: finish him!
 
 def find_timestamp(fname, timestamp):
     """
