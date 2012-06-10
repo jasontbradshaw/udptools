@@ -198,74 +198,85 @@ class UDPPlay:
     def find_timestamp_smart(dump_file, timestamp):
         """
         Finds the first position directly before the given position in the given
-        dump file object.  Returns the file position in bytes such that the next
-        read from that position would be aligned with the beginning of the
-        appropriate line, ie. the first line with a timestamp greater than or
-        equal to the specified timestamp.  Returns 'None' if the requested
-        timestamp could not be found in the file (was too far in the future, for
-        example).
+        dump file object. Returns the file position in bytes such that the next
+        read from that position would return the first line with a timestamp
+        greater than or equal to the specified timestamp. If the given timestamp
+        occurs before the beginning of the file, returns the first position in
+        the dump file. If the given timestamp is after the end of the file,
+        returns the final position in the file.
         """
 
-        def find_recursive(fd, timestamp, start_pos, end_pos):
+        # TODO: when ANY exception is encountered, fall back to final_timestamp
+
+        def reverse_seek_to_newline(f):
             """
-            A binary search algorithm for a timestamped line in the given file.
-            Returns the file position (in bytes) of the beginning of the
-            requested line, or 'None' if that line doesn't exist.  start_pos is
-            the starting byte position to consider, end_pos the end position.
-            An end_pos of 'None' means "The end of the file."
+            Seek backwards in an open file until a newline is encountered,
+            leaving the file at the first position after that newline.
             """
 
-            # TODO: make this return 'None' when the line isn't found
-            # TODO: refactor this method to be more intuitive!
+            while f.read(1) != "\n":
+                # seek backwards twice to regain ground lost by reading
+                df.seek(-2, os.SEEK_CUR)
 
-            # if end_pos is None, set it instead to the end position of the file
-            # by 'seek'ing to the end, then 'tell'ing for the position.
-            if end_pos is None:
-                OS_SEEK_END = 2
-                fd.seek(0, OS_SEEK_END)
-                end_pos = fd.tell()
+        # read the last line of the file to find the time there
+        with open(dump_file, 'r') as df:
+            # seek to the end of the file and get the file size
+            df.seek(0, os.SEEK_END)
+            file_size = df.tell()
 
-            # go to the middle of the two given positions
-            middle_pos = (end_pos + start_pos) / 2
-            fd.seek(middle_pos)
+            # seek to the last guaranteed non-EOF, non-newline character
+            df.seek(-2, os.SEEK_END)
 
-            # read a line to skip to the start of the next line. we save the
-            # skipped part so we can use its length to calculate the beginning
-            # of the nearest line.
-            raw_skipped = fd.readline()
+            # seek backwards and read up to after the first encountered newline
+            reverse_seek_to_newline(df)
 
-            # add the part we skipped to the middle position so it lines up with
-            # the nearest packet boundary.
-            middle_pos = middle_pos + len(raw_skipped)
+            # read final time in the file so we can interpolate other times
+            final_timestamp = self.parse_packet(df.readline())[0]
 
-            # if we skipped more than half of the remaining bytes being checked
-            # against, we're not going to find a different time than what we
-            # already found, so we return the special value -1 to signal that
-            # the previous middle byte position should be returned.
-            if len(raw_skipped) >= (end_pos - start_pos) / 2:
-                return -1
+            # estimate a position for the desired time
+            pos_guess = int((1.0 * timestamp / final_timestamp) * file_size)
 
-            # get the next line and parse out the timestamp
-            raw_line = fd.readline()
-            raw_parts = raw_line.split("\t")
-            line_timestamp = float(raw_parts[0])
+            # limit the guess to the file's boundaries
+            pos_guess = max(min(pos_guess, file_size), 0)
 
-            # search left half of range
-            if timestamp < line_timestamp:
-                result = find_recursive(fd, timestamp, start_pos, middle_pos)
-                if result < 0:
-                    return middle_pos
-                return result
+            # seek to the guessed position and determine which way we need to
+            # read from there to arrive at the desired position.
+            df.seek(pos_guess)
 
-            # search right half of range
-            else:
-                result = find_recursive(fd, timestamp, middle_pos, end_pos)
-                if result < 0:
-                    return middle_pos
-                return result
+            # TODO: finish him!
 
-        # run our recursive function and return the seek position
-        return find_recursive(dump_file, timestamp, 0, None)
+    @classmethod
+    def find_timestamp(dump_file, timestamp):
+        """
+        Reads every line in a file until it either finds the specified time or
+        fails to find it at all. Returns the file position in bytes such that
+        the next read from that position would return an entire packet
+        containing the first time that fell on or after the given timestamp. If
+        the given timestamp occurs after the last timestamp in the file, the
+        final position in the file is returned. If it occurs before the file
+        starts, the first position in the file is returned.
+        """
+
+        with open(dump_file, 'r') as df:
+            previous_position = 0
+            for line in df:
+                # get line timestamp and compare to see whether we should return
+                # the previous position. if parse fails, skip the packet.
+                try:
+                    line_timestamp = self.parse_packet(line)[0]
+                except PacketParseError:
+                    # skip this packet and try the next one
+                    break
+
+                # return the previous position if we've exceeded the timestamp
+                if line_timestamp >= timestamp:
+                    break
+
+                # rotate the current position backwards and continue if we
+                # haven't found the given timestamp yet.
+                previous_position = df.tell()
+
+        return previous_position
 
 class UDPDump:
     @classmethod
