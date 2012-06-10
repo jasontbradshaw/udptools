@@ -3,17 +3,6 @@ import base64
 import time
 import multiprocessing as mp
 
-class AlreadyRunningError(Exception):
-    """
-    Raised when a dump is attempted while the object is already dumping, or when
-    a play is attempted when the object is already playing.
-    """
-
-class PacketParseError(Exception):
-    """
-    Raised when a packet couldn't be successfully parsed.
-    """
-
 class UDPPlay:
     def __init__(self):
         self.proc = None
@@ -27,14 +16,15 @@ class UDPPlay:
 
     def play(self, dump_file, host, port, begin_time=0, end_time=None):
         """
-        Plays the given file to the given host and port.
+        Plays the given file to the given host and port. Returns False and does
+        nothing if the process is already running, otherwise starts the playback
+        and returns True once the playback finishes.
         """
 
         # make sure that we don't start a new process while there's one already
         # running.
         if self.is_running():
-            raise AlreadyRunningError("Unable to start a new play process while"
-                    " one is already running.  Stop playback first!")
+            return False
 
         # create the socket we'll send packets over
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -45,6 +35,9 @@ class UDPPlay:
             self.proc = mp.Process(target=self.play_loop, args=args)
 
             self.proc.start()
+
+        # signal that playback completed
+        return True
 
     def stop(self):
         """
@@ -67,31 +60,31 @@ class UDPPlay:
         Splits packet into a time and some data. The part before the tab
         character is the time, the part after is data followed by a newline.
         Returns a tuple of (floating point timestamp, binary data string).
-        Raises a PacketParseError if the packet could not be sucessfully parsed.
+        Raises a ValueError if the packet could not be sucessfully parsed.
         """
 
         try:
             parts = packet.split("\t")
             assert len(parts) == 2
         except AssertionError:
-            raise PacketParseError("Could not split timestamp and data in "
+            raise ValueError("Could not split timestamp and data in "
                     "packet '%s'" % packet)
 
         try:
             timestamp = float(parts[0])
             assert timestamp >= 0.0
         except AssertionError:
-            raise PacketParseError("Got invalid timestamp '%.10f' from packet "
+            raise ValueError("Got invalid timestamp '%.10f' from packet "
                     "'%s'" % (timestamp, packet))
         except ValueError:
-            raise PacketParseError("Invalid float format for timestamp in "
+            raise ValueError("Invalid float format for timestamp in "
                     "packet '%s'" % packet)
 
         try:
             # the rstrip call removes the trailing newline
             data = base64.b64decode(parts[1].rstrip())
         except Exception, e:
-            raise PacketParseError("Invalid data format in packet '%s'\n"
+            raise ValueError("Invalid data format in packet '%s'\n"
                     "Got error: '%s'" % (packet, str(e)))
 
         return timestamp, data
@@ -130,9 +123,9 @@ class UDPPlay:
             # we fail to parse the packet, skip it.
             try:
                 packet_timestamp, packet_data = self.parse_packet(line)
-            except PacketParseError, ppe:
+            except ValueError, e:
                 # TODO: log this instead
-                print ppe
+                print e
                 continue
 
             # stop playback before the specified end time
@@ -256,7 +249,7 @@ class UDPPlay:
                 # the previous position. if parse fails, skip the packet.
                 try:
                     line_timestamp = self.parse_packet(line)[0]
-                except PacketParseError:
+                except ValueError:
                     # skip this packet and try the next one
                     break
 
@@ -290,8 +283,7 @@ class UDPDump:
 
         # raise an exception if there's already a dump running
         if self.is_running():
-            raise AlreadyRunningError("Unable to start a new dump while one is "
-                    "already running.  Stop the current dump first!")
+            return False
 
         # set up the socket we're capturing packets from
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -301,6 +293,9 @@ class UDPDump:
             self.proc = mp.Process(target=self.dump_loop, args=args)
 
             self.proc.start()
+
+        # signal that the dump operation completed
+        return True
 
     def stop(self):
         """
