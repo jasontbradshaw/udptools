@@ -6,15 +6,6 @@ import threading
 from base64 import b64encode, b64decode
 from time import time, sleep
 
-def synchronized(method):
-    """Locks an object's method using its internal __lock member."""
-
-    def synchronized_method(self, *args, **kwargs):
-        with self.__lock:
-            return method(self, *args, **kwargs)
-
-    return synchronized_method
-
 def play(f, sock, begin_time=0, end_time=None, player=None):
     """
     Plays a given file object to the specified socket. Doesn't play back
@@ -101,7 +92,7 @@ def play(f, sock, begin_time=0, end_time=None, player=None):
     # send what's left in the buffer
     map(send_packet, buf)
 
-def record(self, f, sock, max_packet_size, recorder=None):
+def record(f, sock, max_packet_size, recorder=None):
     """Record UDP traffic to the given writable file object."""
 
     # store the recording flag for quicker local reference
@@ -294,10 +285,10 @@ class Player(object):
         return self.__fname
 
     @property
-    @synchronized
     def state(self):
         """Get the current state of the object: playing, paused, or stopped."""
-        return self.__state
+        with self.__lock:
+            return self.__state
 
     def stop(self, timeout=10):
         """Stop playback and join the underlying thread."""
@@ -316,7 +307,6 @@ class Player(object):
         # reset the thread reference
         self.__proc = None
 
-    @synchronized
     def play(self, begin_time=0, end_time=None):
         """
         Play the file. Playing continues until stop() is called. Returns
@@ -324,30 +314,31 @@ class Player(object):
         happening.
         """
 
-        # don't do anything if it's already playing a file
-        if self.__state != STOPPED:
-            return False
+        with self.__lock:
+            # don't do anything if it's already playing a file
+            if self.__state != STOPPED:
+                return False
 
-        # create the socket we'll send packets over, binding it to the address
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind(self.__address)
+            # create the socket, binding it to the address
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(self.__address)
 
-        # create a function that opens and plays the internal file
-        def play_thread():
-            with open(self.__fname, 'r') as f:
-                play(f, sock, begin_time, end_time, player=self)
+            # create a function that opens and plays the internal file
+            def play_thread():
+                with open(self.__fname, 'r') as f:
+                    play(f, sock, begin_time, end_time, player=self)
 
-        # build the playback thread
-        self.__proc = threading.Thread(play_thread)
+            # build the playback thread
+            self.__proc = threading.Thread(play_thread)
 
-        # set that we're playing before we start the thread
-        self.__state = PLAYING
+            # set that we're playing before we start the thread
+            self.__state = PLAYING
 
-        # start the playback thread
-        self.__proc.start()
+            # start the playback thread
+            self.__proc.start()
 
-        # signal that playback was started
-        return True
+            # signal that playback was started
+            return True
 
 class Recorder(object):
 
@@ -374,10 +365,10 @@ class Recorder(object):
         return self.__fname
 
     @property
-    @synchronized
     def state(self):
         """Get the current state of the object: recording or stopped."""
-        return self.__state
+        with self.__lock:
+            return self.__state
 
     def stop(self, timeout=10):
         """Stop recording and join the underlying thread."""
@@ -392,29 +383,29 @@ class Recorder(object):
 
         self.__proc = None
 
-    @synchronized
     def record(self, max_packet_size=16384):
         """
         Record any UDP traffic from an address to a file. max_packet_size is the
         size in bytes of the largest packet able to be received.
         """
 
-        # don't do anything if it's already recording a file
-        if self.__state != STOPPED:
-            return False
+        with self.__lock:
+            # don't do anything if it's already recording a file
+            if self.__state != STOPPED:
+                return False
 
-        # set up the socket we're capturing packets from
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setblocking(False) # non-blocking so we can use select on it
-        sock.bind(self.__address)
+            # set up the socket we're capturing packets from
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setblocking(False) # non-blocking so we can use select on it
+            sock.bind(self.__address)
 
-        # create a function that records to the file, appending if specified
-        def record_thread():
-            with open(self.__fname, 'w') as f:
-                record(f, sock, max_packet_size, recorder=self)
+            # create a function that records to the file, appending if specified
+            def record_thread():
+                with open(self.__fname, 'w') as f:
+                    record(f, sock, max_packet_size, recorder=self)
 
-        self.__proc = threading.Thread(record_thread)
-        self.__state = RECORDING
-        self.__proc.start()
+            self.__proc = threading.Thread(record_thread)
+            self.__state = RECORDING
+            self.__proc.start()
 
-        return True
+            return True
