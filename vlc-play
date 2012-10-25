@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # starts a VLC instance in the background that plays back an RTP stream coming
-# from the local machine on the given port.  redirects all output to /dev/null
-# to make it be truly quiet.
+# from the local machine on the given port. redirects all output to /dev/null to
+# make it be truly quiet.
 
 vlc --quiet rtp://127.0.0.1:$1 2> /dev/null &

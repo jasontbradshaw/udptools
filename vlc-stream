@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+# streams the given file as h264 over an RTP stream on the local machine from
+# the specified port. silences all output.
+
+cvlc --quiet $1 --sout \
+    "#transcode{vcodec=h264}:rtp{dst=127.0.0.1,port=$2,mux=ts,ttl=1}" \
+    2> /dev/null
